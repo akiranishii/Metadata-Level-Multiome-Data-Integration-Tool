@@ -10,6 +10,7 @@ library(stringr)
 library(DT)
 library(tidyverse)
 library(plotly)
+library(shiny)
 
 # Update UI
 ui <- fluidPage(
@@ -40,20 +41,28 @@ ui <- fluidPage(
                        textInput("proteomics_search_symbol", "Search by Symbol:", ""),
                        numericInput("proteomics_log2FC_threshold", "min log2FoldChange Threshold:", 0),
                        numericInput("proteomics_padj_threshold", "max padj Threshold:", 0.05, min = 0, max = 1, step = 0.01)
-      )
+      ),
+      auth0::logoutButton()
     ),
     mainPanel(
       tabsetPanel(id = "tabs",
                   tabPanel("Metadata", 
-                           DTOutput("metadata_table")),
+                           DTOutput("metadata_table"),
+                           downloadButton("download_metadata", "Download Metadata")),
                   tabPanel("RNA-seq",
                            DTOutput("rnaseq_table"),
                            div(style = "height: 20px;"),
+                           downloadButton("download_rnaseq", "Download RNA-seq Data"),
                            checkboxInput("show_plot", "MA plot (will not work for 'All datasets')", value = FALSE),
+                           uiOutput("gene_selectize_group"),
                            plotlyOutput("rnaseq_plot")),
                   tabPanel("Proteomics",
                            DTOutput("proteomics_table"),
-                           div(style = "height: 20px;"))
+                           div(style = "height: 20px;"),
+                           downloadButton("download_proteomics", "Download Proteomics Data"),
+                           checkboxInput("show_proteomics_plot", "Volcano plot (will not work for 'All datasets')", value = FALSE),
+                           uiOutput("protein_selectize_group"),
+                           plotlyOutput("proteomics_plot"))
       )
     )
   )
@@ -119,7 +128,6 @@ server <- function(input, output, session) {
       rna_seq_combined <- rna_seq_combined %>% filter(grepl(tolower(input$rnaseq_search_symbol), tolower(Symbol), fixed = TRUE))
     }
     
-    
     rna_seq_combined <- rna_seq_combined %>% filter(abs(log2FoldChange) >= input$rnaseq_log2FC_threshold, padj <= input$rnaseq_padj_threshold)
     
     rna_seq_combined
@@ -137,6 +145,18 @@ server <- function(input, output, session) {
     datatable(filtered_rnaseq_data(),
               options = list(lengthMenu = c(5, 10, 20, 50), pageLength = 10))
   })
+  
+  output$gene_selectize_group <- renderUI({
+    if (!is.null(filtered_rnaseq_data())) {
+      selectizeInput("selected_genes", "Select genes to label on the plot (only filtered genes appear here):",
+                     choices = unique(filtered_rnaseq_data()$Symbol),
+                     multiple = TRUE,
+                     options = list(placeholder = "Search and select genes"))
+    } else {
+      return(NULL)
+    }
+  })
+  
   
   # return plot data
   plot_data <- reactive({
@@ -173,20 +193,37 @@ server <- function(input, output, session) {
     titlefont = f
   )
   
-  
-  # render plot
   output$rnaseq_plot <- renderPlotly({
     if (input$show_plot) {
       if (is.null(plot_data())) {
         return(NULL)
       } else {
-        plot_ly(data = plot_data(), x = ~log2bm, y = ~log2FoldChange, text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange, 
-                                                                                    '<br>log2meanexpression:', log2bm, '<br>P:', padj), mode = "markers", color = ~group, symbols = ~selected) %>% layout(title = paste(input$rnaseq_dataset, "MA_plot"), xaxis = x, yaxis = y)
+        selected_genes <- input$selected_genes
+        selected_data <- plot_data() %>% filter(Symbol %in% selected_genes)
+        unselected_data <- plot_data() %>% filter(!(Symbol %in% selected_genes))
+        
+        plot_ly() %>%
+          add_trace(data = unselected_data,
+                    x = ~log2bm, y = ~log2FoldChange,
+                    text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange,
+                                  '<br>log2meanexpression:', log2bm, '<br>P:', padj),
+                    mode = "markers",
+                    color = ~group,
+                    marker = list(symbol = "circle")) %>%
+          add_trace(data = selected_data,
+                    x = ~log2bm, y = ~log2FoldChange,
+                    text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange,
+                                  '<br>log2meanexpression:', log2bm, '<br>P:', padj),
+                    mode = "markers",
+                    # color = ~group,
+                    marker = list(symbol = "x", color = "red")) %>%
+          layout(title = paste(input$rnaseq_dataset, "MA_plot"), xaxis = x, yaxis = y)
       }
     } else {
       return(NULL)
     }
   })
+  
   
   # Read proteomics datasets
   proteomics_data <- reactive({
@@ -227,9 +264,113 @@ server <- function(input, output, session) {
               options = list(lengthMenu = c(5, 10, 20, 50), pageLength = 10))
   })
   
+  output$protein_selectize_group <- renderUI({
+    if (!is.null(filtered_proteomics_data())) {
+      selectizeInput("selected_proteins", "Select proteins to label on the plot (only filtered proteins appear here):",
+                     choices = unique(filtered_proteomics_data()$Symbol),
+                     multiple = TRUE,
+                     options = list(placeholder = "Search and select proteins"))
+    } else {
+      return(NULL)
+    }
+  })
+  
+  
+  # return plot data
+  proteomics_plot_data <- reactive({
+    if (input$proteomics_dataset == "All datasets") {
+      return(NULL)
+    } else {
+      data <- proteomics_data()[[input$proteomics_dataset]]
+      pseudo_count <- 1e-10
+      data <- data %>% mutate(log10_padj = -1*log10(padj + pseudo_count))
+      plot_data <- data %>% select(Symbol, log2FoldChange, padj, log10_padj)
+      
+      plot_data["group"] <- "NotSignificant(p>0.05)"
+      plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] < 0 ),"group"] <- "Down(p<0.05 & log2FC<0)"
+      plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] > 0 ),"group"] <- "Up(p<0.05 & log2FC>0)"
+      
+      plot_data["selected"] <- "Not Selected"
+      plot_data[which(grepl(tolower(input$proteomics_search_symbol), tolower(plot_data[['Symbol']]), fixed = TRUE)),"selected"] <- "Selected"
+      
+      return(plot_data)
+    }
+  })
+  
+  x_p <- list(
+    title = "log2 Fold Change",
+    titlefont = f
+  )
+  y_p <- list(
+    title = "-log10 padj",
+    titlefont = f
+  )
+  
+  output$proteomics_plot <- renderPlotly({
+    if (input$show_proteomics_plot) {
+      if (is.null(proteomics_plot_data())) {
+        return(NULL)
+      } else {
+        selected_proteins <- input$selected_proteins
+        selected_data <- proteomics_plot_data() %>% filter(Symbol %in% selected_proteins)
+        unselected_data <- proteomics_plot_data() %>% filter(!(Symbol %in% selected_proteins))
+        
+        plot_ly() %>%
+          add_trace(data = unselected_data,
+                    x = ~log2FoldChange, y = ~log10_padj,
+                    text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange, '<br>P:', padj),
+                    mode = "markers",
+                    color = ~group,
+                    marker = list(symbol = "circle")) %>%
+          add_trace(data = selected_data,
+                    x = ~log2FoldChange, y = ~log10_padj,
+                    text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange, '<br>P:', padj),
+                    mode = "markers",
+                    # color = ~group,
+                    marker = list(symbol = "x", color = "red")) %>%
+          layout(title = paste(input$proteomics_dataset, "MA_plot"), xaxis = x_p, yaxis = y_p)
+      }
+    } else {
+      return(NULL)
+    }
+  })
+  
+  
+  ####### Add option to download tables
+  
+  # Download filtered metadata
+  output$download_metadata <- downloadHandler(
+    filename = function() {
+      paste("filtered_metadata", Sys.Date(), ".csv", sep = "_")
+    },
+    content = function(file) {
+      write.csv(filtered_metadata(), file, row.names = FALSE)
+    }
+  )
+  
+  # Download filtered RNA-seq data
+  output$download_rnaseq <- downloadHandler(
+    filename = function() {
+      paste("filtered_rnaseq", Sys.Date(), ".csv", sep = "_")
+    },
+    content = function(file) {
+      write.csv(filtered_rnaseq_data(), file, row.names = FALSE)
+    }
+  )
+  
+  # Download filtered proteomics data
+  output$download_proteomics <- downloadHandler(
+    filename = function() {
+      paste("filtered_proteomics", Sys.Date(), ".csv", sep = "_")
+    },
+    content = function(file) {
+      write.csv(filtered_proteomics_data(), file, row.names = FALSE)
+    }
+  )
+  
 }
 
 # Run the application
-shinyApp(ui = ui, server = server)
-
+auth0::shinyAppAuth0(ui, server)
+# shinyApp(ui, server)
                                
