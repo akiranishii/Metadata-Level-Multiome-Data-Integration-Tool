@@ -3,8 +3,12 @@ if (!requireNamespace("purrr", quietly = TRUE)) {
   install.packages("purrr")
   install.packages("DT")
   install.packages("plotly")
+  install.packages("shinydashboard")
+  install.packages("markdown")
 }
 
+library(markdown)
+library(shinydashboard)
 library(purrr)
 library(stringr)
 library(DT)
@@ -46,10 +50,15 @@ ui <- fluidPage(
     ),
     mainPanel(
       tabsetPanel(id = "tabs",
-                  tabPanel("Metadata", 
+                  tabPanel("Welcome", includeMarkdown("welcome_text.md")),
+                  tabPanel("Metadata",
+                           div(style = "font-size: 18px; color: red; margin-bottom: 10px;",
+                               "Note: Data may take up to a minute to load."),
                            DTOutput("metadata_table"),
                            downloadButton("download_metadata", "Download Metadata")),
                   tabPanel("RNA-seq",
+                           div(style = "font-size: 18px; color: red; margin-bottom: 10px;",
+                               "Note: Data may take up to a minute to load."),
                            DTOutput("rnaseq_table"),
                            div(style = "height: 20px;"),
                            downloadButton("download_rnaseq", "Download RNA-seq Data"),
@@ -57,6 +66,8 @@ ui <- fluidPage(
                            uiOutput("gene_selectize_group"),
                            plotlyOutput("rnaseq_plot")),
                   tabPanel("Proteomics",
+                           div(style = "font-size: 18px; color: red; margin-bottom: 10px;",
+                               "Note: Data may take up to a minute to load."),
                            DTOutput("proteomics_table"),
                            div(style = "height: 20px;"),
                            downloadButton("download_proteomics", "Download Proteomics Data"),

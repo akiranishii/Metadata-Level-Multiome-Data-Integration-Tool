@@ -5,9 +5,9 @@ account: akiranishii
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 9046510
-bundleId: 7185167
+bundleId: 7186389
 url: https://akiranishii.shinyapps.io/Metadata-Level-Multiome-Data-Integration-Tool/
-when: 1683469041.0472
-lastSyncTime: 1683469041.04724
+when: 1683500863.00229
+lastSyncTime: 1683500863.00231
 asMultiple: FALSE
 asStatic: FALSE
