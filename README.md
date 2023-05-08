@@ -67,7 +67,9 @@ To use the RNA-seq, Proteomics, and Lipidomics Data Explorer, follow these steps
 ### Exploring Metadata
 
 1. In the first tab, explore the `metadata.csv` file, which includes columns for "ID", "Experiment type", "Species", "Comparison (Treatment)", "Comparison (Control)", "Experiment ID", "Experimental design", "GEO accession number", "Link to publication", "Contact", and "Raw and processed file storage location."
-2. Filter the dataframe by "Experiment type" ("Bulk RNA-seq", "Proteomics", or "Lipidomics"), Species ("Mouse" or "Human"), or search by keyword in the "ID" column.
+2. Filter the dataframe by "Experiment type" ("Bulk RNA-seq", "Proteomics", or "Lipidomics"), Species ("Mouse" or "Human"), or search by keyword in the "ID" column.  
+
+<img width="1431" alt="metadata" src="https://user-images.githubusercontent.com/62619033/236710111-797610b5-319d-4dcf-9e86-1be1ffa141f0.png">
 
 ### Exploring RNA-seq Datasets
 
@@ -75,8 +77,9 @@ To use the RNA-seq, Proteomics, and Lipidomics Data Explorer, follow these steps
 2. Select the RNA-seq dataset you want to explore. If you choose the “all datasets” option, all datasets will be vertically concatenated. If you select a particular dataset, only that dataset will be visible.
 3. Search the dataframe by the Symbol column.
 4. Toggle a log2FoldChange and padj threshold. Only genes above the log2FoldChange threshold and below the padj threshold will be visible.
-5. Visualize the RNA-seq data as MA plots, where each point represents a gene and is plotted according to its average expression (baseMean) and log2 fold change. Customize the plot highlighting genes of interest.
+5. Visualize the RNA-seq data as MA plots, where each point represents a gene and is plotted according to its average expression (baseMean) and log2 fold change. Customize the plot highlighting genes of interest.  
 
+<img width="1435" alt="rnaseq" src="https://user-images.githubusercontent.com/62619033/236710120-9be71b90-dbda-4e03-b287-f5c11285b1f4.png">
 
 ### Exploring Proteomics Datasets
 
@@ -84,8 +87,9 @@ To use the RNA-seq, Proteomics, and Lipidomics Data Explorer, follow these steps
 2. Select the proteomics dataset you want to explore. If you choose the “all datasets” option, all datasets will be vertically concatenated. If you select a particular dataset, only that dataset will be visible.
 3. Search the dataframe by the Protein symbol column.
 4. Toggle a log2FoldChange and padj threshold. Only genes above the log2FoldChange threshold and below the padj threshold will be visible.
-5. Visualize the proteomics data as volcano plots, where each point represents a protein and is plotted according to its log2 fold change and padj value. Customize the plot by highlighting proteins of interest.
+5. Visualize the proteomics data as volcano plots, where each point represents a protein and is plotted according to its log2 fold change and padj value. Customize the plot by highlighting proteins of interest.  
 
+<img width="1435" alt="proteomics" src="https://user-images.githubusercontent.com/62619033/236710132-29af5031-e567-4239-9860-cd5fc8547a16.png">
 
 ### Exploring Lipidomics Datasets
 
