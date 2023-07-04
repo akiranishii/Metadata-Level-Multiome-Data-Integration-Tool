@@ -35,13 +35,13 @@ ui <- fluidPage(
                        checkboxInput("show_exp_design", "Show experimental design", value = FALSE)
       ),
       conditionalPanel(condition = "input.tabs === 'RNA-seq'",
-                       selectInput("rnaseq_dataset", "Select RNA-seq dataset:", NULL),
+                       selectizeInput("rnaseq_dataset", "Select RNA-seq dataset:", NULL, multiple = TRUE),
                        textInput("rnaseq_search_symbol", "Search by Symbol:", ""),
                        numericInput("rnaseq_log2FC_threshold", "min log2FoldChange Threshold:", 0),
                        numericInput("rnaseq_padj_threshold", "max padj Threshold:", 0.05, min = 0, max = 1, step = 0.01)
       ),
       conditionalPanel(condition = "input.tabs === 'Proteomics'",
-                       selectInput("proteomics_dataset", "Select Proteomics dataset:", NULL),
+                       selectizeInput("proteomics_dataset", "Select Proteomics dataset:", NULL, multiple = TRUE),
                        textInput("proteomics_search_symbol", "Search by Symbol:", ""),
                        numericInput("proteomics_log2FC_threshold", "min log2FoldChange Threshold:", 0),
                        numericInput("proteomics_padj_threshold", "max padj Threshold:", 0.05, min = 0, max = 1, step = 0.01)
@@ -64,7 +64,7 @@ ui <- fluidPage(
                            downloadButton("download_rnaseq", "Download RNA-seq Data"),
                            checkboxInput("show_plot", "MA plot (will not work for 'All datasets')", value = FALSE),
                            uiOutput("gene_selectize_group"),
-                           plotlyOutput("rnaseq_plot")),
+                           plotlyOutput("rnaseq_plot", height = "auto")),
                   tabPanel("Proteomics",
                            div(style = "font-size: 18px; color: red; margin-bottom: 10px;",
                                "Note: Data may take up to a minute to load."),
@@ -130,10 +130,11 @@ server <- function(input, output, session) {
   
   # Filter RNA-seq data
   filtered_rnaseq_data <- reactive({
-    if (input$rnaseq_dataset == "All datasets") {
+    selected_datasets <- input$rnaseq_dataset
+    if ("All datasets" %in% selected_datasets) {
       rna_seq_combined <- bind_rows(rna_seq_data())
     } else {
-      rna_seq_combined <- rna_seq_data()[[input$rnaseq_dataset]]
+      rna_seq_combined <- bind_rows(rna_seq_data()[selected_datasets])
     }
     if (input$rnaseq_search_symbol != "") {
       rna_seq_combined <- rna_seq_combined %>% filter(grepl(tolower(input$rnaseq_search_symbol), tolower(Symbol), fixed = TRUE))
@@ -150,7 +151,7 @@ server <- function(input, output, session) {
                       choices = c("All datasets", gsub(".csv", "", basename(list.files("rna-seq", pattern = "*.csv")))),
                       selected = "All datasets")
   })
-  
+
   # Render RNA-seq table
   output$rnaseq_table <- renderDT({
     datatable(filtered_rnaseq_data(),
@@ -168,26 +169,31 @@ server <- function(input, output, session) {
     }
   })
   
-  
   # return plot data
   plot_data <- reactive({
-    if (input$rnaseq_dataset == "All datasets") {
+    if ("All datasets" %in% input$rnaseq_dataset) {
       return(NULL)
     } else {
-      data <- rna_seq_data()[[input$rnaseq_dataset]]
-      data <- data %>% mutate(log2bm = log2(baseMean + 1))
-      plot_data <- data %>% select(Symbol, log2FoldChange, padj, log2bm)
-      
-      plot_data["group"] <- "NotSignificant(p>0.05)"
-      plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] < 0 ),"group"] <- "Down(p<0.05 & log2FC<0)"
-      plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] > 0 ),"group"] <- "Up(p<0.05 & log2FC>0)"
-      
-      plot_data["selected"] <- "Not Selected"
-      plot_data[which(grepl(tolower(input$rnaseq_search_symbol), tolower(plot_data[['Symbol']]), fixed = TRUE)),"selected"] <- "Selected"
-      
-      return(plot_data)
+      # Change the 'else' part here to return a list of data frames, one for each selected dataset
+      data_list <- lapply(input$rnaseq_dataset, function(dataset) {
+        data <- rna_seq_data()[[dataset]]
+        data <- data %>% mutate(log2bm = log2(baseMean + 1))
+        plot_data <- data %>% select(Symbol, log2FoldChange, padj, log2bm)
+        
+        plot_data["group"] <- "NotSignificant(p>0.05)"
+        plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] < 0 ),"group"] <- "Down(p<0.05 & log2FC<0)"
+        plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] > 0 ),"group"] <- "Up(p<0.05 & log2FC>0)"
+        
+        plot_data["selected"] <- "Not Selected"
+        plot_data[which(grepl(tolower(input$rnaseq_search_symbol), tolower(plot_data[['Symbol']]), fixed = TRUE)),"selected"] <- "Selected"
+        
+        return(plot_data)
+      })
+      names(data_list) <- input$rnaseq_dataset
+      return(data_list)
     }
   })
+  
   
   f <- list(
     family = "Courier New, monospace",
@@ -204,36 +210,69 @@ server <- function(input, output, session) {
     titlefont = f
   )
   
+
   output$rnaseq_plot <- renderPlotly({
     if (input$show_plot) {
       if (is.null(plot_data())) {
         return(NULL)
       } else {
         selected_genes <- input$selected_genes
-        selected_data <- plot_data() %>% filter(Symbol %in% selected_genes)
-        unselected_data <- plot_data() %>% filter(!(Symbol %in% selected_genes))
         
-        plot_ly() %>%
-          add_trace(data = unselected_data,
-                    x = ~log2bm, y = ~log2FoldChange,
-                    text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange,
-                                  '<br>log2meanexpression:', log2bm, '<br>P:', padj),
-                    mode = "markers",
-                    color = ~group,
-                    marker = list(symbol = "circle")) %>%
-          add_trace(data = selected_data,
-                    x = ~log2bm, y = ~log2FoldChange,
-                    text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange,
-                                  '<br>log2meanexpression:', log2bm, '<br>P:', padj),
-                    mode = "markers",
-                    # color = ~group,
-                    marker = list(symbol = "x", color = "red")) %>%
-          layout(title = paste(input$rnaseq_dataset, "MA_plot"), xaxis = x, yaxis = y)
+        plot_list <- lapply(names(plot_data()), function(name) {
+          data <- plot_data()[[name]]
+          selected_data <- data %>% filter(Symbol %in% selected_genes)
+          unselected_data <- data %>% filter(!(Symbol %in% selected_genes))
+          
+          plot_ly() %>%
+            add_trace(data = unselected_data,
+                      x = ~log2bm, y = ~log2FoldChange,
+                      text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange,
+                                    '<br>log2meanexpression:', log2bm, '<br>P:', padj),
+                      mode = "markers",
+                      color = ~group,
+                      marker = list(symbol = "circle")) %>%
+            add_trace(data = selected_data,
+                      x = ~log2bm, y = ~log2FoldChange,
+                      text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange,
+                                    '<br>log2meanexpression:', log2bm, '<br>P:', padj),
+                      mode = "markers",
+                      # color = ~group,
+                      marker = list(symbol = "x", color = "red")) %>%
+            layout(xaxis = x, 
+                   yaxis = y,
+                   margin = list(t = 40),
+                   annotations = list(
+                     x = 0.5,
+                     y = 1.2,
+                     text = paste(name, "MA_plot"),
+                     showarrow = F,
+                     xref='paper',
+                     yref='paper',
+                     xanchor='center',
+                     yanchor='top',
+                     font=list(size=10)
+                   ))
+        })
+        
+        # Define the height for each individual plot
+        plot_height <- 200 # you might need to adjust this
+        
+        # Calculate the total height
+        total_height <- plot_height * length(names(plot_data())) 
+        
+        p <- subplot(plot_list, nrows = length(plot_list), shareX = TRUE, shareY = TRUE)
+        
+        # Set the layout height to the total_height calculated
+        p <- p %>% layout(height = total_height)
+        
+        return(p)
       }
     } else {
       return(NULL)
     }
   })
+  
+  
   
   
   # Read proteomics datasets
@@ -250,10 +289,11 @@ server <- function(input, output, session) {
   
   # Filter proteomics data
   filtered_proteomics_data <- reactive({
-    if (input$proteomics_dataset == "All datasets") {
+    selected_datasets <- input$proteomics_dataset
+    if ("All datasets" %in% selected_datasets) {
       proteomics_combined <- bind_rows(proteomics_data())
     } else {
-      proteomics_combined <- proteomics_data()[[input$proteomics_dataset]]
+      proteomics_combined <- bind_rows(proteomics_data()[selected_datasets])
     }
     if (input$proteomics_search_symbol != "") {
       proteomics_combined <- proteomics_combined %>% filter(grepl(tolower(input$proteomics_search_symbol), tolower(Symbol), fixed = TRUE))
@@ -268,13 +308,13 @@ server <- function(input, output, session) {
                       choices = c("All datasets", gsub(".csv", "", basename(list.files("proteomics", pattern = "*.csv")))),
                       selected = "All datasets")
   })
-  
+
   # Render proteomics table
   output$proteomics_table <- renderDT({
     datatable(filtered_proteomics_data(),
               options = list(lengthMenu = c(5, 10, 20, 50), pageLength = 10))
   })
-  
+
   output$protein_selectize_group <- renderUI({
     if (!is.null(filtered_proteomics_data())) {
       selectizeInput("selected_proteins", "Select proteins to label on the plot (only filtered proteins appear here):",
@@ -289,24 +329,30 @@ server <- function(input, output, session) {
   
   # return plot data
   proteomics_plot_data <- reactive({
-    if (input$proteomics_dataset == "All datasets") {
+    if ("All datasets" %in% input$proteomics_dataset) {
       return(NULL)
     } else {
-      data <- proteomics_data()[[input$proteomics_dataset]]
-      pseudo_count <- 1e-10
-      data <- data %>% mutate(log10_padj = -1*log10(padj + pseudo_count))
-      plot_data <- data %>% select(Symbol, log2FoldChange, padj, log10_padj)
-      
-      plot_data["group"] <- "NotSignificant(p>0.05)"
-      plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] < 0 ),"group"] <- "Down(p<0.05 & log2FC<0)"
-      plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] > 0 ),"group"] <- "Up(p<0.05 & log2FC>0)"
-      
-      plot_data["selected"] <- "Not Selected"
-      plot_data[which(grepl(tolower(input$proteomics_search_symbol), tolower(plot_data[['Symbol']]), fixed = TRUE)),"selected"] <- "Selected"
-      
-      return(plot_data)
+      # Change the 'else' part here to return a list of data frames, one for each selected dataset
+      data_list <- lapply(input$proteomics_dataset, function(dataset) {
+        data <- proteomics_data()[[dataset]]
+        pseudo_count <- 1e-10
+        data <- data %>% mutate(log10_padj = -1*log10(padj + pseudo_count))
+        plot_data <- data %>% select(Symbol, log2FoldChange, padj, log10_padj)
+        
+        plot_data["group"] <- "NotSignificant(p>0.05)"
+        plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] < 0 ),"group"] <- "Down(p<0.05 & log2FC<0)"
+        plot_data[which(plot_data['padj'] < 0.05 & plot_data['log2FoldChange'] > 0 ),"group"] <- "Up(p<0.05 & log2FC>0)"
+        
+        plot_data["selected"] <- "Not Selected"
+        plot_data[which(grepl(tolower(input$proteomics_search_symbol), tolower(plot_data[['Symbol']]), fixed = TRUE)),"selected"] <- "Selected"
+        
+        return(plot_data)
+      })
+      names(data_list) <- input$proteomics_dataset
+      return(data_list)
     }
   })
+  
   
   x_p <- list(
     title = "log2 Fold Change",
@@ -317,29 +363,59 @@ server <- function(input, output, session) {
     titlefont = f
   )
   
+  
   output$proteomics_plot <- renderPlotly({
     if (input$show_proteomics_plot) {
       if (is.null(proteomics_plot_data())) {
         return(NULL)
       } else {
         selected_proteins <- input$selected_proteins
-        selected_data <- proteomics_plot_data() %>% filter(Symbol %in% selected_proteins)
-        unselected_data <- proteomics_plot_data() %>% filter(!(Symbol %in% selected_proteins))
         
-        plot_ly() %>%
-          add_trace(data = unselected_data,
-                    x = ~log2FoldChange, y = ~log10_padj,
-                    text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange, '<br>P:', padj),
-                    mode = "markers",
-                    color = ~group,
-                    marker = list(symbol = "circle")) %>%
-          add_trace(data = selected_data,
-                    x = ~log2FoldChange, y = ~log10_padj,
-                    text = ~paste("Gene name: ", Symbol, '<br>log2FC:', log2FoldChange, '<br>P:', padj),
-                    mode = "markers",
-                    # color = ~group,
-                    marker = list(symbol = "x", color = "red")) %>%
-          layout(title = paste(input$proteomics_dataset, "MA_plot"), xaxis = x_p, yaxis = y_p)
+        plot_list <- lapply(names(proteomics_plot_data()), function(name) {
+          data <- proteomics_plot_data()[[name]]
+          selected_data <- data %>% filter(Symbol %in% selected_proteins)
+          unselected_data <- data %>% filter(!(Symbol %in% selected_proteins))
+          
+          plot_ly() %>%
+            add_trace(data = unselected_data,
+                      x = ~log2FoldChange, y = ~log10_padj,
+                      text = ~paste("Protein name: ", Symbol, '<br>log2FC:', log2FoldChange, '<br>P:', padj),
+                      mode = "markers",
+                      color = ~group,
+                      marker = list(symbol = "circle")) %>%
+            add_trace(data = selected_data,
+                      x = ~log2FoldChange, y = ~log10_padj,
+                      text = ~paste("Protein name: ", Symbol, '<br>log2FC:', log2FoldChange, '<br>P:', padj),
+                      mode = "markers",
+                      marker = list(symbol = "x", color = "red")) %>%
+            layout(xaxis = x_p, 
+                   yaxis = y_p,
+                   margin = list(t = 40),
+                   annotations = list(
+                     x = 0.5,
+                     y = 1.2,
+                     text = paste(name, "MA_plot"),
+                     showarrow = F,
+                     xref='paper',
+                     yref='paper',
+                     xanchor='center',
+                     yanchor='top',
+                     font=list(size=10)
+                   ))
+        })
+        
+        
+        # Define the height for each individual plot
+        plot_height <- 200 # you might need to adjust this
+        
+        # Calculate the total height
+        total_height <- plot_height * length(names(proteomics_plot_data())) 
+        
+        p <- subplot(plot_list, nrows = length(plot_list), shareX = TRUE, shareY = TRUE)
+        
+        # Set the layout height to the total_height calculated
+        p <- p %>% layout(height = total_height)
+        
       }
     } else {
       return(NULL)
